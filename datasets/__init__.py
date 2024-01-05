@@ -11,7 +11,6 @@ Authors: zouzhaofan(zouzhf41@chinatelecom.cn)
 Date:    2021/12/20 23:11:11
 """
 
-from .transform import Transforms
-from .fasdataset import FasDataset
+from .fasdataset import MX_WFAS
 
-__all__ = ['Transforms', 'FASDataset']
+__all__ = ['MX_WFAS']

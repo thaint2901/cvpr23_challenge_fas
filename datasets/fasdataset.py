@@ -11,132 +11,125 @@ Date:    2023/02/08
 """
 
 import os
-import cv2
-import copy
-import warnings
-import random
 import numpy as np
-from utils.fileio import load
-from utils.cv_util import distance_pt
-from datasets.transform import Transforms
+import mxnet as mx
+import torch
+from torch.utils.data import Dataset
+from torchvision import transforms
+from torchtoolbox.transform import Cutout
 
-class FasDataset():
-    """YeWu dataset for FAS.
-    The annotation format is show as follows:
-        -- annotation.txt
-            ...
-            img_path/img_name.jpg x_1 y_1 ... x_72 y_72 label
-            ...
-    Args:
-        ann_file (str or list[str]): Annotation file path
-        pipeline (dict): Processing pipeline.
-        data_root (str, optional): Data root for ``ann_file``,
-            ``img_prefix``, ``mask_prefix``,  if specified.
-        test_mode (bool, optional): If set True, annotation will not be loaded.
-        enlarge (float): enlarge face to crop according to landmarks.
-    """
-    NAME = "FasDataset"
+def _get_new_box(src_w, src_h, bbox, scale):
+    x = bbox[0]
+    y = bbox[1]
+    box_w = bbox[2] - bbox[0]
+    box_h = bbox[3] - bbox[1]
 
-    def __init__(self,
-                 data_root,
-                 ann_files,
-                 pipeline=None,
-                 img_prefix='',
-                 test_mode=False,
-                 enlarge=3.0,
-                 ):
-        self.ann_files = ann_files if isinstance(ann_files, list) else [ann_files]
-        self.img_prefix = img_prefix if isinstance(img_prefix, list) else [img_prefix]
-        self.data_root = data_root
-        self.test_mode = test_mode
+    scale = min((src_h-1)/box_h, min((src_w-1)/box_w, scale))
 
-        if len(self.img_prefix) == 1:
-            self.img_prefix *= len(self.ann_files)
-        elif len(self.img_prefix) != len(self.ann_files):
-            raise ValueError("num of img_prefix not equal to ann_files!")
+    new_width = box_w * scale
+    new_height = box_h * scale
+    center_x, center_y = box_w/2+x, box_h/2+y
 
-        self.pipeline = 0
-        if isinstance(pipeline, dict):
-            self.pipeline_list = [Transforms(pipeline)]
-        elif isinstance(pipeline, list):
-            self.pipeline_list = [Transforms(p) for p in pipeline]
-        else:
-            raise ValueError("improper format pipeline")
-        self.pipeline_num = len(self.pipeline_list)
+    left_top_x = center_x-new_width/2
+    left_top_y = center_y-new_height/2
+    right_bottom_x = center_x+new_width/2
+    right_bottom_y = center_y+new_height/2
 
-        self.load_annotations(ann_files)
-        self.groups = self.set_group_flag()
+    if left_top_x < 0:
+        right_bottom_x -= left_top_x
+        left_top_x = 0
 
-    def load_annotations(self, ann_files):
-        """load annotation information"""
-        ann_nums = dict()
-        _labels = list()
-        _filenames = list()
-        _domain = list()
-        for i, ann_file in enumerate(ann_files):
-            with open(os.path.join(self.data_root, ann_file), 'r') as f:
-                lines = f.readlines()
-            ann_nums[os.path.splitext(os.path.basename(ann_file))[0]] = len(lines)
-            for j, l in enumerate(lines):
-                l = l.strip().split()
-                try:
-                    label = (1-int(l[1]))
-                    # domain = 0
-                except:
-                    label = 0 if self.test_mode else 10
-                    # domain = 1
-                domain = i
-                _labels.append(label)
-                _filenames.append(os.path.join(self.img_prefix[i], l[0]))
-                _domain.append(domain)
+    if left_top_y < 0:
+        right_bottom_y -= left_top_y
+        left_top_y = 0
+
+    if right_bottom_x > src_w-1:
+        left_top_x -= right_bottom_x-src_w+1
+        right_bottom_x = src_w-1
+
+    if right_bottom_y > src_h-1:
+        left_top_y -= right_bottom_y-src_h+1
+        right_bottom_y = src_h-1
+
+    return int(left_top_x), int(left_top_y),\
+            int(right_bottom_x), int(right_bottom_y)
+
+def get_train_transform(input_size=224):
+    return transforms.Compose([
+        transforms.ToPILImage(),
+        #transforms.RandomErasing(),
+        transforms.Resize([input_size,input_size]),
+        transforms.ColorJitter(0.15, 0.15, 0.15),
+        transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
+        Cutout(0.2),
+
+        transforms.RandomHorizontalFlip(),
  
-        self.labels = np.array(_labels)
-        self.filenames = np.array(_filenames)
-        self.domain = np.array(_domain)
-        self.ann_nums = ann_nums
+        transforms.ToTensor(),
+        transforms.Normalize(
+            [0.485, 0.456, 0.406],
+            [0.229, 0.2254, 0.225])
+    ])
 
-    def set_group_flag(self):
-        """Set flag according to label"""
-        self.flag = np.zeros(len(self), dtype=np.uint8)
-        for i in range(len(self)):
-            self.flag[i] = self.labels[i]
-        return np.bincount(self.flag)
+def get_val_transform(input_size=224):
+    return transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize([input_size,input_size]),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            [0.485, 0.456, 0.406],
+            [0.229, 0.2254, 0.225])
+    ])
 
-    def _rand_another(self, idx):
-        """random select another index"""
-        pool = np.where(self.flag == self.flag[idx])[0]
-        return np.random.choice(pool)
 
-    def _get_ann_info(self, filename, label, domain):
-        """read images and annotations"""
-        img = cv2.imread(filename)
-        if img is None:
-            print(filename)
-        data = dict(
-            img=img,
-            label=np.ones((1,)).astype(np.int64) * label,
-            path=os.path.relpath(filename, self.img_prefix[0]) if len(set(self.img_prefix))==1 else filename,
-            domain=domain
-            )
-        return data
-
-    def __getitem__(self, idx):
-        while True:
-            label = copy.deepcopy(self.labels[idx])
-            filename = copy.deepcopy(self.filenames[idx])
-            domain = copy.deepcopy(self.domain[idx])
-            try:
-                data = self._get_ann_info(filename, label, domain)
-            except:
-                warnings.warn('Fail to read image: {}'.format(filename))
-                idx = self._rand_another(idx)
-                continue
-            break
+class MX_WFAS(Dataset):
+    def __init__(self, path_imgrec, path_imgidx, input_size, test_mode=False, scale=1.0):
+        super(MX_WFAS, self).__init__()
+        self.test_mode = test_mode
         if self.test_mode:
-            data = self.pipeline_list[self.pipeline](data)
+            self.transform = get_val_transform(input_size)
         else:
-            data = self.pipeline_list[0](data)
-        return data
-    
+            self.transform = get_train_transform(input_size)
+        self.imgrec = mx.recordio.MXIndexedRecordIO(path_imgidx, path_imgrec, 'r')
+        self.imgidx = np.array(list(self.imgrec.keys))
+        self.scale = scale
+
+    def __getitem__(self, index):
+        idx = self.imgidx[index]
+        s = self.imgrec.read_idx(idx)
+        header, img = mx.recordio.unpack(s)
+        labels = header.label
+        sample = mx.image.imdecode(img).asnumpy()  # RGB
+        bbox = labels[2:6].astype(np.int32)
+        label = int(labels[0])
+        labels = [label, int(labels[1]) + 1]  # 0: live, 1->n: spoof_type
+        
+        # crop face bbox
+        # scale = np.random.uniform(1.0, 1.2)
+        bbox = _get_new_box(sample.shape[1], sample.shape[0], bbox, scale=self.scale)
+        sample = sample[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
+        # cv2.imwrite("./tmp.jpg", sample)
+        
+        if self.transform is not None:
+            sample = self.transform(sample)
+
+        return sample, torch.tensor(labels, dtype=torch.long)
+
     def __len__(self):
-        return len(self.labels)
+        return len(self.imgidx)
+
+
+if __name__ == "__main__":
+    train_set = MX_WFAS(
+        path_imgrec="/mnt/sdc1/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/test_4.0.rec",
+        path_imgidx="/mnt/sdc1/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/test_4.0.idx",
+        input_size=224,
+        test_mode=False,
+        scale=1.0
+    )
+
+    while True:
+        idx = np.random.randint(0, len(train_set))
+        train_set[idx]
+    print(train_set[0])
+    print("Done")

@@ -85,7 +85,6 @@ def main():
     total = sum([param.nelement() for param in model.parameters()])
     logger.info(f'Parameters: {total:.3e}')
     logger.info(f'Distributed training: {args.distributed}')
-    logger.info(f'Train dataset: {dataset.groups}')
 
     runner = Runner(
         model,
@@ -100,18 +99,19 @@ def main():
     if cfg.eval_cfg is not None:
         val_dataset = build_datasets(cfg.data.val)
         val_dataloader = build_dataloaders(cfg.data.test_loader, val_dataset)
-        logger.info(f'Val dataset: {val_dataset.groups}')
 
         runner.val_dataloader = val_dataloader
 
-    if cfg.get('step_cfg'):
-        test_dataset = build_datasets(cfg.data.test)
-        test_dataloader = build_dataloaders(cfg.data.test_loader, test_dataset)
-        runner.test_dataloader = test_dataloader
+    # if cfg.get('step_cfg'):
+    #     test_dataset = build_datasets(cfg.data.test)
+    #     test_dataloader = build_dataloaders(cfg.data.test_loader, test_dataset)
+    #     runner.test_dataloader = test_dataloader
 
-        runner.train_step(dataloader, cfg)
-    else:
-        runner.train(dataloader, cfg)
+    #     runner.train_step(dataloader, cfg)
+    # else:
+    #     runner.train(dataloader, cfg)
+    
+    runner.train(dataloader, cfg)
 
 
 if __name__ == '__main__':

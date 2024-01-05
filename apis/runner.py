@@ -17,7 +17,6 @@ import time
 import torch
 import numpy as np
 from tqdm import tqdm
-from visualdl import LogWriter
 from apis.evaluator import Metric
 from utils.dist import is_main_process
 from apis.visualizer import VisualizeLog, VisualizeTSNE
@@ -91,28 +90,26 @@ class Runner(object):
         self._eta = 0
         self._lr = 0
 
-        os.makedirs(os.path.expanduser(self.work_dir), exist_ok=True)
-
         if self.optim_cfg is not None:
             self._warmup = self.sched_cfg.pop('warmup', 0)
             self.optimizer = build_optimizers(self.optim_cfg, self.model)
             self.scheduler = build_schedulers(self.sched_cfg, self.optimizer)
-            if self.log_cfg.plog_cfg is not None:
-                self.vis_log = VisualizeLog(self.work_dir, self.log_cfg.plog_cfg)
-                self.writer_log = LogWriter(logdir=self.work_dir)
-                hparm_cfg = self.log_cfg.plog_cfg.pop('hparm_cfg', None)
-                if hparm_cfg is not None:
-                    self.writer_log.add_hparams(
-                        hparams_dict=dict(hparm_cfg),
-                        metrics_list=self.log_cfg.plog_cfg.eval_types + self.log_cfg.plog_cfg.loss_types)
+            # if self.log_cfg.plog_cfg is not None:
+            #     self.vis_log = VisualizeLog(self.work_dir, self.log_cfg.plog_cfg)
+            #     self.writer_log = LogWriter(logdir=self.work_dir)
+            #     hparm_cfg = self.log_cfg.plog_cfg.pop('hparm_cfg', None)
+            #     if hparm_cfg is not None:
+            #         self.writer_log.add_hparams(
+            #             hparams_dict=dict(hparm_cfg),
+            #             metrics_list=self.log_cfg.plog_cfg.eval_types + self.log_cfg.plog_cfg.loss_types)
 
         self._score = np.zeros((self.check_cfg.pop('save_topk', 1),), dtype=np.float32)
         self._init_model(self.check_cfg.resume_from, self.check_cfg.load_from, 
                          self.check_cfg.pretrain_from)
         self.metric = Metric(logger, self.work_dir, eval_cfg)
 
-        if self.eval_cfg.tsne_cfg is not None:
-            self.vis_tsne = VisualizeTSNE(self.work_dir, self.log_cfg.filename, self.eval_cfg.tsne_cfg.copy())
+        # if self.eval_cfg.tsne_cfg is not None:
+        #     self.vis_tsne = VisualizeTSNE(self.work_dir, self.log_cfg.filename, self.eval_cfg.tsne_cfg.copy())
 
         self.dataloader = None
         self.val_dataloader = None
@@ -134,10 +131,11 @@ class Runner(object):
         lr = '{:6f}'.format(self._lr)
         self._iter_time = 0
         info = f'Epoch: {self._epoch}, Iter: {self._iter}, ETA: {hours}h{mins}min, Lr: {lr},'
-        self.writer_log.add_scalar(tag='lr', step=self._iter, value=self._lr)
+        # self.writer_log.add_scalar(tag='lr', step=self._iter, value=self._lr)
+        #TODO: Tensorboard instead writer_log
         for k, v in output.items():
-            if self.log_cfg.plog_cfg is not None and (k in self.log_cfg.plog_cfg.loss_types or self.log_cfg.plog_cfg.loss_types == 'all' ):
-                self.writer_log.add_scalar(tag=k, step=self._iter, value=v.mean().detach().item())
+            # if self.log_cfg.plog_cfg is not None and (k in self.log_cfg.plog_cfg.loss_types or self.log_cfg.plog_cfg.loss_types == 'all' ):
+            #     self.writer_log.add_scalar(tag=k, step=self._iter, value=v.mean().detach().item())
             if k == 'loss':
                 continue
             loss = '{:.5f}'.format(v.mean().detach().item())
@@ -231,8 +229,7 @@ class Runner(object):
         for i, data in enumerate(dataloader):
             self._iter += 1
             
-            data.pop('path', 'unknow')
-            output = self.model(**data)
+            output = self.model(img=data[0], label=data[1])
             self.optimizer.zero_grad()
             output['loss'].mean().backward()
 
@@ -262,8 +259,7 @@ class Runner(object):
         labels = list()
         self.model.eval()
         for data in tqdm(self.val_dataloader):
-            data.pop('path', 'unknow')
-            output = self.model(**data)
+            output = self.model(img=data[0], label=data[1])
             preds.append(output[0].detach().cpu().numpy())
             labels.append(output[1].detach().cpu().numpy()[:, 0])
             # if len(output) > 2:
@@ -275,10 +271,10 @@ class Runner(object):
         # if len(feats) > 0:
             # feats = np.concatenate(feats)
             # self.writer_log.add_embeddings(tag='feature', mat=feats, metadata=labels.astype(str))
-        if self.log_cfg.plog_cfg is not None:
-            for k, v in eval_dict.items():
-                if k in self.log_cfg.plog_cfg.eval_types:
-                    self.writer_log.add_scalar(tag=k, step=self._iter, value=v)
+        # if self.log_cfg.plog_cfg is not None:
+        #     for k, v in eval_dict.items():
+        #         if k in self.log_cfg.plog_cfg.eval_types:
+        #             self.writer_log.add_scalar(tag=k, step=self._iter, value=v)
         return score
 
     @torch.no_grad()
@@ -335,8 +331,8 @@ class Runner(object):
 
             self._train_epoch(dataloader)
 
-            if self.log_cfg.plog_cfg is not None:
-                self.vis_log(self.log_cfg.filename)
+            # if self.log_cfg.plog_cfg is not None:
+            #     self.vis_log(self.log_cfg.filename)
 
             self._epoch += 1
             self.scheduler.step()
@@ -344,93 +340,93 @@ class Runner(object):
 
         self.logger.info('End of training!')
 
-    def train_step(self, dataloader, cfg):
-        """train step method"""
-        self._total_epoch = cfg.total_epochs
-        self._total_iter = self._get_total_iter(dataloader, cfg.step_cfg)
-        self.logger.info(f'Start training from the {self._epoch} Epoch, {self._iter} Iter.')
-        self.logger.info(f'Total {self._total_epoch} Epochs, {self._total_iter} Iters, {len(dataloader)} Iter/Epoch.')
+    # def train_step(self, dataloader, cfg):
+    #     """train step method"""
+    #     self._total_epoch = cfg.total_epochs
+    #     self._total_iter = self._get_total_iter(dataloader, cfg.step_cfg)
+    #     self.logger.info(f'Start training from the {self._epoch} Epoch, {self._iter} Iter.')
+    #     self.logger.info(f'Total {self._total_epoch} Epochs, {self._total_iter} Iters, {len(dataloader)} Iter/Epoch.')
 
-        train_dataset = dataloader.dataset
-        test_dataset = self.test_dataloader.dataset
+    #     train_dataset = dataloader.dataset
+    #     test_dataset = self.test_dataloader.dataset
 
-        pselc, nselc = np.where(train_dataset.flag == 0)[0], np.where(train_dataset.flag != 0)[0]
+    #     pselc, nselc = np.where(train_dataset.flag == 0)[0], np.where(train_dataset.flag != 0)[0]
 
-        np.random.shuffle(pselc)
-        np.random.shuffle(nselc)
+    #     np.random.shuffle(pselc)
+    #     np.random.shuffle(nselc)
 
-        plmks, nlmks = train_dataset.lmks[pselc].copy(), train_dataset.lmks[nselc].copy()
-        plabels, nlabels = train_dataset.labels[pselc].copy(), train_dataset.labels[nselc].copy()
-        pfilenames, nfilenames = train_dataset.filenames[pselc].copy(), train_dataset.filenames[nselc].copy()
+    #     plmks, nlmks = train_dataset.lmks[pselc].copy(), train_dataset.lmks[nselc].copy()
+    #     plabels, nlabels = train_dataset.labels[pselc].copy(), train_dataset.labels[nselc].copy()
+    #     pfilenames, nfilenames = train_dataset.filenames[pselc].copy(), train_dataset.filenames[nselc].copy()
 
-        ir, hr, dr = cfg.step_cfg.init_rate, cfg.step_cfg.hem_rate, cfg.step_cfg.decay_rate
+    #     ir, hr, dr = cfg.step_cfg.init_rate, cfg.step_cfg.hem_rate, cfg.step_cfg.decay_rate
 
-        train_dataset.lmks = np.concatenate([plmks[:int(ir * len(plmks))].copy(), 
-                                            nlmks[:int(ir * len(nlmks))].copy()], axis=0)
-        train_dataset.labels = np.concatenate([plabels[:int(ir * len(plabels))].copy(), 
-                                            nlabels[:int(ir * len(nlabels))].copy()], axis=0)
-        train_dataset.filenames = np.concatenate([pfilenames[:int(ir * len(pfilenames))].copy(), 
-                                            nfilenames[:int(ir * len(nfilenames))].copy()], axis=0)
+    #     train_dataset.lmks = np.concatenate([plmks[:int(ir * len(plmks))].copy(), 
+    #                                         nlmks[:int(ir * len(nlmks))].copy()], axis=0)
+    #     train_dataset.labels = np.concatenate([plabels[:int(ir * len(plabels))].copy(), 
+    #                                         nlabels[:int(ir * len(nlabels))].copy()], axis=0)
+    #     train_dataset.filenames = np.concatenate([pfilenames[:int(ir * len(pfilenames))].copy(), 
+    #                                         nfilenames[:int(ir * len(nfilenames))].copy()], axis=0)
 
-        plmks, nlmks =  plmks[int(ir * len(plmks)):].copy(), nlmks[int(ir * len(nlmks)):].copy()
-        plabels, nlabels = plabels[int(ir * len(plabels)):].copy(), nlabels[int(ir * len(nlabels)):].copy()
-        pfilenames, nfilenames = pfilenames[int(ir * len(pfilenames)):].copy(), nfilenames[int(ir * len(nfilenames)):].copy()
+    #     plmks, nlmks =  plmks[int(ir * len(plmks)):].copy(), nlmks[int(ir * len(nlmks)):].copy()
+    #     plabels, nlabels = plabels[int(ir * len(plabels)):].copy(), nlabels[int(ir * len(nlabels)):].copy()
+    #     pfilenames, nfilenames = pfilenames[int(ir * len(pfilenames)):].copy(), nfilenames[int(ir * len(nfilenames)):].copy()
 
-        # train_dataset.data_infos = pinfos[:int(ir * len(pinfos))].tolist() + ninfos[:int(ir * len(ninfos))].tolist()
-        # pinfos, ninfos = pinfos[int(ir * len(pinfos)):], ninfos[int(ir * len(ninfos)):]
+    #     # train_dataset.data_infos = pinfos[:int(ir * len(pinfos))].tolist() + ninfos[:int(ir * len(ninfos))].tolist()
+    #     # pinfos, ninfos = pinfos[int(ir * len(pinfos)):], ninfos[int(ir * len(ninfos)):]
 
-        self.model.train()
-        start_epoch = self._epoch
-        self.logger.info(f'Train sub dataset: {train_dataset.set_group_flag()}')
-        dataloader = build_dataloaders(cfg.data.train_loader, train_dataset)
-        for epoch in range(start_epoch, self._total_epoch):
+    #     self.model.train()
+    #     start_epoch = self._epoch
+    #     self.logger.info(f'Train sub dataset: {train_dataset.set_group_flag()}')
+    #     dataloader = build_dataloaders(cfg.data.train_loader, train_dataset)
+    #     for epoch in range(start_epoch, self._total_epoch):
 
-            self._train_epoch(dataloader)
+    #         self._train_epoch(dataloader)
 
-            self._epoch += 1
-            if self._epoch % cfg.step_cfg.interval == 0:
-                # test_dataset.data_infos = pinfos.tolist() + ninfos.tolist()
-                test_dataset.lmks = np.concatenate([plmks.copy(), nlmks.copy()], axis=0)
-                test_dataset.labels = np.concatenate([plabels.copy(), nlabels.copy()], axis=0)
-                test_dataset.filenames = np.concatenate([pfilenames.copy(), nfilenames.copy()], axis=0)
+    #         self._epoch += 1
+    #         if self._epoch % cfg.step_cfg.interval == 0:
+    #             # test_dataset.data_infos = pinfos.tolist() + ninfos.tolist()
+    #             test_dataset.lmks = np.concatenate([plmks.copy(), nlmks.copy()], axis=0)
+    #             test_dataset.labels = np.concatenate([plabels.copy(), nlabels.copy()], axis=0)
+    #             test_dataset.filenames = np.concatenate([pfilenames.copy(), nfilenames.copy()], axis=0)
 
-                self.logger.info(f'Test sub dataset: {test_dataset.set_group_flag()}')
-                test_dataloader = build_dataloaders(cfg.data.test_loader, test_dataset)
+    #             self.logger.info(f'Test sub dataset: {test_dataset.set_group_flag()}')
+    #             test_dataloader = build_dataloaders(cfg.data.test_loader, test_dataset)
 
-                preds, labels = self.test(test_dataloader)
+    #             preds, labels = self.test(test_dataloader)
 
-                pinds = np.argsort(preds[:len(plabels)])
-                ninds = np.argsort(-preds[len(plabels):])
+    #             pinds = np.argsort(preds[:len(plabels)])
+    #             ninds = np.argsort(-preds[len(plabels):])
 
-                phn, nhn = int(hr * len(plabels)), int(hr * len(nlabels))
-                phs, nhs = preds[pinds[: phn]].mean(), preds[ninds[: nhn] + len(plabels)].mean()
+    #             phn, nhn = int(hr * len(plabels)), int(hr * len(nlabels))
+    #             phs, nhs = preds[pinds[: phn]].mean(), preds[ninds[: nhn] + len(plabels)].mean()
 
-                # hard_infos = pinfos[pinds[: phn]].tolist() + ninfos[ninds[: nhn]].tolist()
-                # train_dataset.data_infos.extend(hard_infos)
+    #             # hard_infos = pinfos[pinds[: phn]].tolist() + ninfos[ninds[: nhn]].tolist()
+    #             # train_dataset.data_infos.extend(hard_infos)
 
-                train_dataset.lmks = np.concatenate([train_dataset.lmks.copy(), 
-                                            plmks[pinds[: phn]].copy(), nlmks[ninds[: nhn]].copy()], axis=0)
-                train_dataset.labels = np.concatenate([train_dataset.labels.copy(), 
-                                            plabels[pinds[: phn]].copy(), nlabels[ninds[: nhn]].copy()], axis=0)
-                train_dataset.filenames = np.concatenate([train_dataset.filenames.copy(), 
-                                            pfilenames[pinds[: phn]].copy(), nfilenames[ninds[: nhn]].copy()], axis=0)
+    #             train_dataset.lmks = np.concatenate([train_dataset.lmks.copy(), 
+    #                                         plmks[pinds[: phn]].copy(), nlmks[ninds[: nhn]].copy()], axis=0)
+    #             train_dataset.labels = np.concatenate([train_dataset.labels.copy(), 
+    #                                         plabels[pinds[: phn]].copy(), nlabels[ninds[: nhn]].copy()], axis=0)
+    #             train_dataset.filenames = np.concatenate([train_dataset.filenames.copy(), 
+    #                                         pfilenames[pinds[: phn]].copy(), nfilenames[ninds[: nhn]].copy()], axis=0)
 
-                self.logger.info(f'Train sub dataset: {train_dataset.set_group_flag()}')
-                dataloader = build_dataloaders(cfg.data.train_loader, train_dataset)
+    #             self.logger.info(f'Train sub dataset: {train_dataset.set_group_flag()}')
+    #             dataloader = build_dataloaders(cfg.data.train_loader, train_dataset)
 
-                # pinfos, ninfos = pinfos[pinds[phn:]], ninfos[ninds[nhn:]]
-                plmks, nlmks =  plmks[pinds[phn:]].copy(), nlmks[ninds[nhn:]].copy()
-                plabels, nlabels = plabels[pinds[phn:]].copy(), nlabels[ninds[nhn:]].copy()
-                pfilenames, nfilenames = pfilenames[pinds[phn:]].copy(), nfilenames[ninds[nhn:]].copy()
+    #             # pinfos, ninfos = pinfos[pinds[phn:]], ninfos[ninds[nhn:]]
+    #             plmks, nlmks =  plmks[pinds[phn:]].copy(), nlmks[ninds[nhn:]].copy()
+    #             plabels, nlabels = plabels[pinds[phn:]].copy(), nlabels[ninds[nhn:]].copy()
+    #             pfilenames, nfilenames = pfilenames[pinds[phn:]].copy(), nfilenames[ninds[nhn:]].copy()
 
-                hr *= dr
+    #             hr *= dr
 
-                self.logger.info(f'Phard num: {phn}, score: {phs}, Nhard num: {nhn}, score: {nhs}')
+    #             self.logger.info(f'Phard num: {phn}, score: {phs}, Nhard num: {nhn}, score: {nhs}')
 
-            if self.log_cfg.plog_cfg is not None:
-                self.vis_log(self.log_cfg.filename)
+    #         if self.log_cfg.plog_cfg is not None:
+    #             self.vis_log(self.log_cfg.filename)
 
-            self.scheduler.step()
-            self._save_model(filename='latest.pth')
+    #         self.scheduler.step()
+    #         self._save_model(filename='latest.pth')
 
-        self.logger.info('End of step training!')
+    #     self.logger.info('End of step training!')

@@ -71,11 +71,13 @@ def build_dataloaders(cfg, dataset, num_replicas=None, rank=None, **kwargs):
     if cfg_.pop('shuffle', False):
         if dataset.test_mode:
             warnings.warn('Using BalanceSampler when test mode is True.')
+        sampler = None
         if distributed:
             sampler = DistBalanceSampler(dataset, num_replicas, rank)
-        else:
+        elif cfg_.get('sampler', None):
             sampler_type = cfg_.pop('sampler', 'BalanceSampler')
             sampler = eval(sampler_type)(dataset, cfg['samples_per_gpu'])
+
     num_gpus = cfg_.pop('num_gpus')
     if distributed:
         batch_size = cfg_.pop('samples_per_gpu')
