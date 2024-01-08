@@ -10,7 +10,8 @@ Authors: xuyaowen(xuyw1@chinatelecom.cn)
 Date:    2023/02/08
 """
 
-import os
+import math
+import cv2
 import numpy as np
 import mxnet as mx
 import torch
@@ -54,6 +55,48 @@ def _get_new_box(src_w, src_h, bbox, scale):
     return int(left_top_x), int(left_top_y),\
             int(right_bottom_x), int(right_bottom_y)
 
+def get_gaussian_band_pass_filter(shape, cutoff_high = 2, cutoff_low = 30):
+    """
+        Gaussian band pass filter
+    """
+    d0 = cutoff_low
+    rows, cols = shape[:2]
+    mask = np.zeros((rows, cols))
+    mid_row, mid_col = int(rows / 2), int(cols / 2)
+    for i in range(rows):
+        for j in range(cols):
+            d = math.sqrt((i - mid_row) ** 2 + (j - mid_col) ** 2)
+            if d < cutoff_high:
+                mask[i, j] = 0
+            else:
+                mask[i, j] = np.exp(-(d * d) / (2 * d0 * d0))
+    mask = mask.reshape((rows, cols, 1))
+    return np.tile(mask, (1, 1, 3))
+
+
+def transform_band_pass_filter(img, mask):
+    '''
+        Perform band pass filtering
+    '''
+    # 1. FFT
+    fft = np.fft.fft2(img, axes = (0, 1))
+
+    # 2. Shift the fft to the center of the low frequencies
+    shift_fft = np.fft.fftshift(fft, axes = (0, 1))
+
+    # 3. Filter the image frequency based on the mask
+    filtered_image = np.multiply(mask, shift_fft)
+
+    # 4. Compute the inverest shift
+    shift_ifft = np.fft.ifftshift(filtered_image, axes = (0, 1))
+
+    # 5. Compute the inverse fourier transform
+    ifft = np.fft.ifft2(shift_ifft, axes = (0, 1))
+    ifft = np.abs(ifft)
+
+    return ifft.astype('uint8')
+
+
 def get_train_transform(input_size=224):
     return transforms.Compose([
         transforms.ToPILImage(),
@@ -93,6 +136,8 @@ class MX_WFAS(Dataset):
         self.imgrec = mx.recordio.MXIndexedRecordIO(path_imgidx, path_imgrec, 'r')
         self.imgidx = np.array(list(self.imgrec.keys))
         self.scale = scale
+        self.kernel_bpf = get_gaussian_band_pass_filter((input_size, input_size))
+        self.input_size = input_size
 
     def __getitem__(self, index):
         idx = self.imgidx[index]
@@ -108,12 +153,17 @@ class MX_WFAS(Dataset):
         # scale = np.random.uniform(1.0, 1.2)
         bbox = _get_new_box(sample.shape[1], sample.shape[0], bbox, scale=self.scale)
         sample = sample[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
+        sample = cv2.resize(sample, (self.input_size, self.input_size))
+        sample_filted = transform_band_pass_filter(sample, self.kernel_bpf.copy())
         # cv2.imwrite("./tmp.jpg", sample)
         
         if self.transform is not None:
             sample = self.transform(sample)
+            sample_filted = self.transform(sample_filted)
 
-        return sample, torch.tensor(labels, dtype=torch.long)
+        if self.test_mode:
+            return sample_filted, torch.tensor(labels, dtype=torch.long)
+        return (sample, sample_filted), torch.tensor(labels, dtype=torch.long)
 
     def __len__(self):
         return len(self.imgidx)
