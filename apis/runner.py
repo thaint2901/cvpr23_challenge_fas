@@ -85,6 +85,7 @@ class Runner(object):
         self._total_epoch = 0
         self._total_iter = 0
         self._iter_time = 0
+        self._data_time = 0
         self._epoch = 0
         self._iter = 0
         self._eta = 0
@@ -130,7 +131,7 @@ class Runner(object):
         hours = '{:2d}'.format(int(eta / 3600))
         lr = '{:6f}'.format(self._lr)
         self._iter_time = 0
-        info = f'Epoch: {self._epoch}, Iter: {self._iter}, ETA: {hours}h{mins}min, Lr: {lr},'
+        info = f'Epoch: {self._epoch}, Data: {self._data_time:.4f}, Iter: {self._iter}, ETA: {hours}h{mins}min, Lr: {lr},'
         # self.writer_log.add_scalar(tag='lr', step=self._iter, value=self._lr)
         #TODO: Tensorboard instead writer_log
         for k, v in output.items():
@@ -228,7 +229,8 @@ class Runner(object):
         start_time = time.time()
         for i, data in enumerate(dataloader):
             self._iter += 1
-            
+            self._data_time = time.time() - start_time
+
             output = self.model(img=data[0], label=data[1])
             self.optimizer.zero_grad()
             output['loss'].mean().backward()
@@ -237,7 +239,6 @@ class Runner(object):
             self._lr_step()
 
             self._iter_time += time.time() - start_time
-            start_time = time.time()
 
             if self._iter % self.log_cfg.interval == 0 and is_main_process():
                 self._log_infos(output)
@@ -250,6 +251,9 @@ class Runner(object):
 
             if self._iter % self.check_cfg.interval == 0 and is_main_process():
                 self._save_model()
+            
+            start_time = time.time()
+
 
     @torch.no_grad()
     def val(self):
