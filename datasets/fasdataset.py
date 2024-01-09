@@ -14,6 +14,7 @@ import math
 import cv2
 import numpy as np
 import mxnet as mx
+import albumentations as A
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -98,30 +99,48 @@ def transform_band_pass_filter(img, mask):
 
 
 def get_train_transform(input_size=224):
-    return transforms.Compose([
-        transforms.ToPILImage(),
-        #transforms.RandomErasing(),
-        transforms.Resize([input_size,input_size]),
-        transforms.ColorJitter(0.15, 0.15, 0.15),
-        transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
-        Cutout(0.2),
+    # return transforms.Compose([
+    #     transforms.ToPILImage(),
+    #     #transforms.RandomErasing(),
+    #     transforms.Resize([input_size,input_size]),
+    #     transforms.ColorJitter(0.15, 0.15, 0.15),
+    #     transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
+    #     Cutout(0.2),
 
-        transforms.RandomHorizontalFlip(),
+    #     transforms.RandomHorizontalFlip(),
  
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.2254, 0.225])
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(
+    #         [0.485, 0.456, 0.406],
+    #         [0.229, 0.2254, 0.225])
+    # ])
+    return A.Compose([
+        A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
+        A.HorizontalFlip(p=0.5),
+        A.augmentations.transforms.ISONoise(color_shift=(0.15,0.35),
+                                            intensity=(0.2, 0.5), p=0.2),
+        A.augmentations.transforms.RandomBrightnessContrast(brightness_limit=0.2,
+                                                            contrast_limit=0.2,
+                                                            brightness_by_max=True,
+                                                            always_apply=False, p=0.3),
+        A.augmentations.transforms.MotionBlur(blur_limit=5, p=0.3),
+        A.Normalize(mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.2254, 0.225])
     ])
 
 def get_val_transform(input_size=224):
-    return transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize([input_size,input_size]),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.2254, 0.225])
+    # return transforms.Compose([
+    #     transforms.ToPILImage(),
+    #     transforms.Resize([input_size,input_size]),
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(
+    #         [0.485, 0.456, 0.406],
+    #         [0.229, 0.2254, 0.225])
+    # ])
+    return A.Compose([
+        A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
+        A.Normalize(mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.2254, 0.225])
     ])
 
 
@@ -158,11 +177,14 @@ class MX_WFAS(Dataset):
         # cv2.imwrite("./tmp.jpg", sample)
         
         if self.transform is not None:
-            sample = self.transform(sample)
-            sample_filted = self.transform(sample_filted)
+            sample = self.transform(image=sample)["image"]
+            sample_filted = self.transform(image=sample_filted)["image"]
+        sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
+        sample_filted = np.transpose(sample_filted, (2, 0, 1)).astype(np.float32)
+
 
         if self.test_mode:
-            return sample_filted, torch.tensor(labels, dtype=torch.long)
+            return sample, torch.tensor(labels, dtype=torch.long)
         return (sample, sample_filted), torch.tensor(labels, dtype=torch.long)
 
     def __len__(self):
