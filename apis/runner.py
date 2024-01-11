@@ -263,7 +263,7 @@ class Runner(object):
         labels = list()
         self.model.eval()
         for data in tqdm(self.val_dataloader):
-            output = self.model(img=data[0], label=data[1])
+            output = self.model(img=data[1], label=data[2])
             preds.append(output[0].detach().cpu().numpy())
             labels.append(output[1].detach().cpu().numpy()[:, 0])
             # if len(output) > 2:
@@ -285,42 +285,26 @@ class Runner(object):
     def test(self, dataloader, resfile=None, ann_nums=None, log_info=True, thr=None):
         """test method"""
         self.model.eval()
-        preds_all = list()
-        for n in range(dataloader.dataset.pipeline_num):
-            dataloader.dataset.pipeline = n
-            self.logger.info(f'Test-Time Augmentation ({n+1}/{dataloader.dataset.pipeline_num})')
-            feats = list()
-            preds = list()
-            paths = list()
-            labels = torch.tensor([])
-            preds = torch.tensor([])
-            for data in tqdm(dataloader):
-                paths.extend(data.pop('path', 'unknow'))
-                output = self.model(**data)
-                preds = torch.cat([preds, output[0].detach().cpu()])
-                labels = torch.cat([labels, output[1].detach().cpu()[:, 0]])
-                if len(output) > 2 and n==dataloader.dataset.pipeline_num-1:
-                    feats.append(output[2].detach().cpu().numpy())
-            preds_all.append(preds.unsqueeze(1))
-            if dataloader.dataset.pipeline_num > 1:
-                score, _ = self.metric(preds.numpy(), labels.numpy(), thr=thr, dataname=str(n+1), log_info=log_info)
-        preds_all = torch.cat(preds_all, dim=1)
-        preds_all = preds_all.mean(dim=1).numpy()
-        labels = labels.numpy()
+        # preds_all = list()
+        # for n in range(dataloader.dataset.pipeline_num):
+        # dataloader.dataset.pipeline = n
+        self.logger.info(f'Begin testing...')
+        preds_all = []
+        for i in range(len(dataloader.dataset)):
+            preds_all.append([f"{dataloader.dataset.test_mode}/{i+1:06d}.jpg", "1.0"])
+        for data in tqdm(dataloader):
+            output = self.model(img=data[1], label=data[2])
+            preds = output[0].detach().cpu()
+            for i, item_idx in enumerate(data[0]):
+                preds_all[item_idx][1] = float(preds[i] >= thr)
+        
+        res_path = os.path.join(self.work_dir, resfile)
+        self.logger.info(f"write result: {res_path}...")
+        with open(res_path, "w") as f:
+            for p in preds_all:
+                f.write(f"{p[0]} {p[1]}\n")
 
-        score, _ = self.metric(preds_all, labels, paths=np.array(paths), thr=thr, resfile=resfile, log_info=log_info)
-        if isinstance(ann_nums, dict) and len(ann_nums) >= 2:
-            ind = 0
-            for ann, num in ann_nums.items():
-                self.metric(preds_all[ind:ind+num], labels[ind:ind+num], thr=thr, dataname=ann, log_info=log_info)
-                ind += num
-        if len(feats) > 0:
-            feats = np.concatenate(feats)
-            if self.eval_cfg.tsne_cfg is not None:
-                self.logger.info('vis tsne...')
-                self.vis_tsne(feats, labels, np.array(paths))
         self.logger.info('End of testing!')
-        return preds_all, score
 
     def train(self, dataloader, cfg):
         """train method"""

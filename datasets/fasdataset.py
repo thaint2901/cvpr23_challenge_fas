@@ -143,7 +143,9 @@ def get_val_transform(input_size=224):
                     std=[0.229, 0.2254, 0.225])
     ])
 
-
+'''
+test_mode: False or val/dev/test
+'''
 class MX_WFAS(Dataset):
     def __init__(self, path_imgrec, path_imgidx, input_size, test_mode=False, scale=1.0):
         super(MX_WFAS, self).__init__()
@@ -184,7 +186,7 @@ class MX_WFAS(Dataset):
 
 
         if self.test_mode:
-            return sample, torch.tensor(labels, dtype=torch.long)
+            return idx, sample, torch.tensor(labels, dtype=torch.long)
         return (sample, sample_filted), torch.tensor(labels, dtype=torch.long)
 
     def __len__(self):

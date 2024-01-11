@@ -8,3 +8,4 @@ mxnet-mkl==1.6.0
 torchtoolbox
 addict
 pandas
+albumentations==0.4.6
