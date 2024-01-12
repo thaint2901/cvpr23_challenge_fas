@@ -18,7 +18,7 @@ import warnings
 import torch.optim as opt
 import torch.optim.lr_scheduler as lrs
 import models.fas as fas
-import datasets as ds
+import dataset as ds
 from torch.utils.data import DataLoader
 from .sampler import BalanceSampler, DistBalanceSampler, SwitchSampler
 

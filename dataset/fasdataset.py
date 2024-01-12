@@ -20,7 +20,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from torchtoolbox.transform import Cutout
 
-def _get_new_box(src_w, src_h, bbox, scale):
+def get_new_box(src_w, src_h, bbox, scale):
     x = bbox[0]
     y = bbox[1]
     box_w = bbox[2] - bbox[0]
@@ -172,7 +172,7 @@ class MX_WFAS(Dataset):
         
         # crop face bbox
         # scale = np.random.uniform(1.0, 1.2)
-        bbox = _get_new_box(sample.shape[1], sample.shape[0], bbox, scale=self.scale)
+        bbox = get_new_box(sample.shape[1], sample.shape[0], bbox, scale=self.scale)
         sample = sample[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
         sample = cv2.resize(sample, (self.input_size, self.input_size))
         sample_filted = transform_band_pass_filter(sample, self.kernel_bpf.copy())
