@@ -39,7 +39,7 @@ class Discriminator(nn.Module):
     '''
     cvpr2020论文(Single-Side Domain Generalization for Face Anti-Spoofing)
     '''
-    def __init__(self, max_iter, input_dim=2048, output_dim=3):
+    def __init__(self, max_iter, input_dim=2048, output_dim=10):
         super(Discriminator, self).__init__()
         self.max_iter = max_iter
         self.iter_num = 0.
@@ -65,15 +65,17 @@ class Discriminator(nn.Module):
 
 
 class Classifier(nn.Module):
-    def __init__(self, feat_dim):
+    def __init__(self, feat_dim, drop_rate):
         super(Classifier, self).__init__()
-        # self.conv_1x1 = ConvNormAct(feat_dim[0], feat_dim[1], kernel_size=1)
-        self.classifier_layer = nn.Linear(feat_dim[0], feat_dim[1])
+        self.drop_rate = drop_rate
+        self.classifier_layer = nn.Linear(feat_dim, 1)  # bce
         self.classifier_layer.weight.data.normal_(0, 0.01)
         self.classifier_layer.bias.data.fill_(0.0)
 
-    def forward(self, input):
-        classifier_out = self.classifier_layer(input)
+    def forward(self, x):
+        x = F.dropout(x, p=self.drop_rate, training=self.training)
+
+        classifier_out = self.classifier_layer(x)
         return classifier_out
 
 
@@ -91,12 +93,14 @@ class DANN(nn.Module):
     """
     def __init__(self,
                  encoder,
+                 cls_cfg,
                  adv_cfg,
-                 feat_dim=(2048, 1),
+                 feat_dim=1024,
                  test_cfg=None,
                  train_cfg=None):
         super(DANN, self).__init__()
         assert isinstance(encoder, dict)
+        assert isinstance(cls_cfg, dict)
         assert isinstance(adv_cfg, dict)
         self.test_cfg = test_cfg
         self.train_cfg = train_cfg
@@ -104,36 +108,28 @@ class DANN(nn.Module):
         self.return_feature = self.test_cfg.pop('return_feature', False)
 
         self.encoder = encoders(encoder)
-        self.only_real = adv_cfg.pop('only_real', False)
-        self.adv = Discriminator(**adv_cfg)
-        self.classifer = Classifier(feat_dim)
-
-        self.features_only = encoder.pop('features_only', False)
+        self.adv = Discriminator(**adv_cfg, input_dim=feat_dim)
+        self.classifer = Classifier(**cls_cfg, feat_dim=feat_dim)
 
         self.cls_loss = nn.CrossEntropyLoss()
         self.bce_loss = nn.BCEWithLogitsLoss()
 
-    def _get_losses(self, feats, label, domain):
+    def _get_losses(self, feats, label):
         """calculate training losses"""
-        labeled = label[:,0]<10
-        loss_bce = self.bce_loss(feats[0][labeled, 0], 1 - label[labeled, 0].float()).unsqueeze(0) * self.train_cfg['w_bce']
-        loss_adv = self.cls_loss(feats[1], domain if not self.only_real else domain[label[:, 0]==0]).unsqueeze(0) * self.train_cfg['w_adv']
+        loss_bce = self.bce_loss(feats[0], (1-label[:, :1]).to(torch.float)) * self.train_cfg['w_bce']
+        loss_adv = self.cls_loss(feats[1], label[:, 1]) * self.train_cfg['w_adv']
         loss = loss_bce + loss_adv
         return dict(loss_bce=loss_bce, loss_adv=loss_adv, loss=loss)
 
-    def forward(self, img, label=None, domain=None):
+    def forward(self, img, label=None):
         """forward"""
-        if self.features_only:
-            feat = self.encoder(img)
-            if isinstance(feat, (list, tuple)):
-                feat = feat[-1]
-            feat = F.adaptive_avg_pool2d(feat, 1).squeeze(3).squeeze(2)
-        else:
-            feat = self.encoder.forward_features(img)
+        feat = self.encoder.forward_features(img)
+        feat = self.encoder.forward_head(feat, pre_logits=True)
+
         out = self.classifer(feat)
         if self.training:
-            ad_out = self.adv(feat if not self.only_real else feat[label[:, 0]==0])
-            losses = self._get_losses([out, ad_out, feat], label, domain)
+            ad_out = self.adv(feat)
+            losses = self._get_losses([out, ad_out], label)
             return losses
         else:
             pred = torch.sigmoid(out/5)[:, 0]

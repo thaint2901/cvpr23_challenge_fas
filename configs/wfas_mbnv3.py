@@ -1,4 +1,4 @@
-work_dir = 'output/wfas_mbnv3'
+work_dir = 'output_tmp/wfas_mbnv3'
 gpu_ids = range(0, 1)
 
 model = dict(
@@ -19,18 +19,25 @@ model = dict(
         w_fused = 0.25))
 data = dict(
     train=dict(
-        type='MX_WFAS',
+        type='MX_WFAS_DualStream',
         path_imgrec='/mnt/sdc1/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/train_4.0.rec',
         path_imgidx='/mnt/sdc1/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/train_4.0.idx',
         input_size=224,
         test_mode=False,
         scale=2.7),
     val=dict(
-        type='MX_WFAS',
+        type='MX_WFAS_DualStream',
         path_imgrec='/mnt/nvme0n1p2/datasets/face/dyno/spoofing_test/spoofing_test_4.0.rec',
         path_imgidx='/mnt/nvme0n1p2/datasets/face/dyno/spoofing_test/spoofing_test_4.0.idx',
         input_size=224,
-        test_mode=True,
+        test_mode="val",
+        scale=2.7),
+    test=dict(
+        type='MX_WFAS_DualStream',
+        path_imgrec='/mnt/nvme0n1p2/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/dev_4.0.rec',
+        path_imgidx='/mnt/nvme0n1p2/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/dev_4.0.idx',
+        input_size=224,
+        test_mode="dev",
         scale=2.7),
     train_loader=dict(
         num_gpus=len(gpu_ids), shuffle=True, samples_per_gpu=16, workers_per_gpu=4),
@@ -51,7 +58,7 @@ sched_cfg = dict(type='CosineLR', total_epochs=30, gamma=0.01, warmup=3000)  # w
 check_cfg = dict(
     interval=40,
     save_topk=3,
-    load_from=None,
+    load_from="output/wfas_mbnv3/top1_model.pth",
     resume_from=None,
     pretrain_from=None)
 total_epochs = 100

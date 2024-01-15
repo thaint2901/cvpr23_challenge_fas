@@ -101,49 +101,49 @@ def transform_band_pass_filter(img, mask):
 
 
 def get_train_transform(input_size=224):
-    return transforms.Compose([
-        transforms.ToPILImage(),
-        #transforms.RandomErasing(),
-        transforms.Resize([input_size,input_size]),
-        transforms.ColorJitter(0.15, 0.15, 0.15),
-        transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
-        Cutout(0.2),
+    # return transforms.Compose([
+    #     transforms.ToPILImage(),
+    #     #transforms.RandomErasing(),
+    #     transforms.Resize([input_size,input_size]),
+    #     transforms.ColorJitter(0.15, 0.15, 0.15),
+    #     transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
+    #     Cutout(0.2),
 
-        transforms.RandomHorizontalFlip(),
+    #     transforms.RandomHorizontalFlip(),
  
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.2254, 0.225])
-    ])
-    # return A.Compose([
-    #     A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
-    #     A.HorizontalFlip(p=0.5),
-    #     A.augmentations.transforms.ISONoise(color_shift=(0.15,0.35),
-    #                                         intensity=(0.2, 0.5), p=0.2),
-    #     A.augmentations.transforms.RandomBrightnessContrast(brightness_limit=0.2,
-    #                                                         contrast_limit=0.2,
-    #                                                         brightness_by_max=True,
-    #                                                         always_apply=False, p=0.3),
-    #     A.augmentations.transforms.MotionBlur(blur_limit=5, p=0.3),
-    #     A.Normalize(mean=[0.485, 0.456, 0.406],
-    #                 std=[0.229, 0.2254, 0.225])
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(
+    #         [0.485, 0.456, 0.406],
+    #         [0.229, 0.2254, 0.225])
     # ])
+    return A.Compose([
+        A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
+        A.HorizontalFlip(p=0.5),
+        A.augmentations.transforms.ISONoise(color_shift=(0.15,0.35),
+                                            intensity=(0.2, 0.5), p=0.2),
+        A.augmentations.transforms.RandomBrightnessContrast(brightness_limit=0.2,
+                                                            contrast_limit=0.2,
+                                                            brightness_by_max=True,
+                                                            always_apply=False, p=0.3),
+        A.augmentations.transforms.MotionBlur(blur_limit=5, p=0.3),
+        A.Normalize(mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.2254, 0.225])
+    ])
 
 def get_val_transform(input_size=224):
-    return transforms.Compose([
-        transforms.ToPILImage(),
-        transforms.Resize([input_size,input_size]),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            [0.485, 0.456, 0.406],
-            [0.229, 0.2254, 0.225])
-    ])
-    # return A.Compose([
-    #     A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
-    #     A.Normalize(mean=[0.485, 0.456, 0.406],
-    #                 std=[0.229, 0.2254, 0.225])
+    # return transforms.Compose([
+    #     transforms.ToPILImage(),
+    #     transforms.Resize([input_size,input_size]),
+    #     transforms.ToTensor(),
+    #     transforms.Normalize(
+    #         [0.485, 0.456, 0.406],
+    #         [0.229, 0.2254, 0.225])
     # ])
+    return A.Compose([
+        A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
+        A.Normalize(mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.2254, 0.225])
+    ])
 
 
 def get_shared_memory(type_, size):
@@ -199,11 +199,11 @@ class MX_WFAS(Dataset):
                 self.shared_labels[index] = np.array(labels)
         # cv2.imwrite("./tmp.jpg", sample)
         
-        # if self.transform is not None:
-        #     sample = self.transform(image=sample)["image"]
-        # sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
         if self.transform is not None:
-            sample = self.transform(sample)
+            sample = self.transform(image=sample)["image"]
+        sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
+        # if self.transform is not None:
+        #     sample = self.transform(sample)
 
         if self.test_mode:
             return idx, sample, torch.tensor(labels, dtype=torch.long)
@@ -221,7 +221,7 @@ test_mode: False or val/dev/test
 '''
 class MX_WFAS_DualStream(Dataset):
     def __init__(self, path_imgrec, path_imgidx, input_size, test_mode=False, scale=1.0):
-        super(MX_WFAS, self).__init__()
+        super(MX_WFAS_DualStream, self).__init__()
         self.test_mode = test_mode
         if self.test_mode:
             self.transform = get_val_transform(input_size)
@@ -251,14 +251,14 @@ class MX_WFAS_DualStream(Dataset):
         sample_filted = transform_band_pass_filter(sample, self.kernel_bpf.copy())
         # cv2.imwrite("./tmp.jpg", sample)
         
-        # if self.transform is not None:
-        #     sample = self.transform(image=sample)["image"]
-        #     sample_filted = self.transform(image=sample_filted)["image"]
-        # sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
-        # sample_filted = np.transpose(sample_filted, (2, 0, 1)).astype(np.float32)
         if self.transform is not None:
-            sample = self.transform(sample)
-            sample_filted = self.transform(sample_filted)
+            sample = self.transform(image=sample)["image"]
+            sample_filted = self.transform(image=sample_filted)["image"]
+        sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
+        sample_filted = np.transpose(sample_filted, (2, 0, 1)).astype(np.float32)
+        # if self.transform is not None:
+        #     sample = self.transform(sample)
+        #     sample_filted = self.transform(sample_filted)
 
 
         if self.test_mode:
