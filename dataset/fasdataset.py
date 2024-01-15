@@ -13,6 +13,8 @@ Date:    2023/02/08
 import math
 import cv2
 import numpy as np
+import ctypes
+import multiprocessing as mp
 import mxnet as mx
 import albumentations as A
 import torch
@@ -99,54 +101,125 @@ def transform_band_pass_filter(img, mask):
 
 
 def get_train_transform(input_size=224):
-    # return transforms.Compose([
-    #     transforms.ToPILImage(),
-    #     #transforms.RandomErasing(),
-    #     transforms.Resize([input_size,input_size]),
-    #     transforms.ColorJitter(0.15, 0.15, 0.15),
-    #     transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
-    #     Cutout(0.2),
+    return transforms.Compose([
+        transforms.ToPILImage(),
+        #transforms.RandomErasing(),
+        transforms.Resize([input_size,input_size]),
+        transforms.ColorJitter(0.15, 0.15, 0.15),
+        transforms.RandomCrop(input_size, padding=6),  #从图片中随机裁剪出尺寸为 input_size 的图片，如果有 padding，那么先进行 padding，再随机裁剪 input_size 大小的图片
+        Cutout(0.2),
 
-    #     transforms.RandomHorizontalFlip(),
+        transforms.RandomHorizontalFlip(),
  
-    #     transforms.ToTensor(),
-    #     transforms.Normalize(
-    #         [0.485, 0.456, 0.406],
-    #         [0.229, 0.2254, 0.225])
-    # ])
-    return A.Compose([
-        A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
-        A.HorizontalFlip(p=0.5),
-        A.augmentations.transforms.ISONoise(color_shift=(0.15,0.35),
-                                            intensity=(0.2, 0.5), p=0.2),
-        A.augmentations.transforms.RandomBrightnessContrast(brightness_limit=0.2,
-                                                            contrast_limit=0.2,
-                                                            brightness_by_max=True,
-                                                            always_apply=False, p=0.3),
-        A.augmentations.transforms.MotionBlur(blur_limit=5, p=0.3),
-        A.Normalize(mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.2254, 0.225])
+        transforms.ToTensor(),
+        transforms.Normalize(
+            [0.485, 0.456, 0.406],
+            [0.229, 0.2254, 0.225])
     ])
+    # return A.Compose([
+    #     A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
+    #     A.HorizontalFlip(p=0.5),
+    #     A.augmentations.transforms.ISONoise(color_shift=(0.15,0.35),
+    #                                         intensity=(0.2, 0.5), p=0.2),
+    #     A.augmentations.transforms.RandomBrightnessContrast(brightness_limit=0.2,
+    #                                                         contrast_limit=0.2,
+    #                                                         brightness_by_max=True,
+    #                                                         always_apply=False, p=0.3),
+    #     A.augmentations.transforms.MotionBlur(blur_limit=5, p=0.3),
+    #     A.Normalize(mean=[0.485, 0.456, 0.406],
+    #                 std=[0.229, 0.2254, 0.225])
+    # ])
 
 def get_val_transform(input_size=224):
-    # return transforms.Compose([
-    #     transforms.ToPILImage(),
-    #     transforms.Resize([input_size,input_size]),
-    #     transforms.ToTensor(),
-    #     transforms.Normalize(
-    #         [0.485, 0.456, 0.406],
-    #         [0.229, 0.2254, 0.225])
-    # ])
-    return A.Compose([
-        A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
-        A.Normalize(mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.2254, 0.225])
+    return transforms.Compose([
+        transforms.ToPILImage(),
+        transforms.Resize([input_size,input_size]),
+        transforms.ToTensor(),
+        transforms.Normalize(
+            [0.485, 0.456, 0.406],
+            [0.229, 0.2254, 0.225])
     ])
+    # return A.Compose([
+    #     A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
+    #     A.Normalize(mean=[0.485, 0.456, 0.406],
+    #                 std=[0.229, 0.2254, 0.225])
+    # ])
+
+
+def get_shared_memory(type_, size):
+    shared_array_base = mp.Array(type_, int(np.prod(list(size))))
+    shared_array = np.ctypeslib.as_array(shared_array_base.get_obj())
+    shared_array = shared_array.reshape(size)
+    return shared_array
+
 
 '''
 test_mode: False or val/dev/test
 '''
 class MX_WFAS(Dataset):
+    def __init__(self, path_imgrec, path_imgidx, input_size, ram_cache=False, test_mode=False, scale=1.0):
+        super(MX_WFAS, self).__init__()
+        self.test_mode = test_mode
+        if self.test_mode:
+            self.transform = get_val_transform(input_size)
+        else:
+            self.transform = get_train_transform(input_size)
+        self.imgrec = mx.recordio.MXIndexedRecordIO(path_imgidx, path_imgrec, 'r')
+        self.imgidx = np.array(list(self.imgrec.keys))
+        self.scale = scale
+        self.use_cache = False
+        self.input_size = input_size
+        self.ram_cache = ram_cache
+        if self.ram_cache:
+            self.shared_dataset = get_shared_memory(ctypes.c_uint8, (len(self.imgidx), input_size, input_size, 3))
+            self.shared_labels = get_shared_memory(ctypes.c_int64, (len(self.imgidx), 2))
+
+    def __getitem__(self, index):
+        if self.use_cache:
+            sample = self.shared_dataset[index]
+            labels = self.shared_labels[index]
+        else:
+            idx = self.imgidx[index]
+            s = self.imgrec.read_idx(idx)
+            header, img = mx.recordio.unpack(s)
+            labels = header.label
+            sample = mx.image.imdecode(img).asnumpy()  # RGB
+            bbox = labels[2:6].astype(np.int32)
+            label = int(labels[0])
+            labels = [label, int(labels[1]) + 1]  # 0: live, 1->n: spoof_type
+            
+            # crop face bbox
+            # scale = np.random.uniform(1.0, 1.2)
+            bbox = get_new_box(sample.shape[1], sample.shape[0], bbox, scale=self.scale)
+            sample = sample[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
+            
+            if self.ram_cache:
+                sample = cv2.resize(sample, (self.input_size, self.input_size))
+                self.shared_dataset[index] = sample.copy()
+                self.shared_labels[index] = np.array(labels)
+        # cv2.imwrite("./tmp.jpg", sample)
+        
+        # if self.transform is not None:
+        #     sample = self.transform(image=sample)["image"]
+        # sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
+        if self.transform is not None:
+            sample = self.transform(sample)
+
+        if self.test_mode:
+            return idx, sample, torch.tensor(labels, dtype=torch.long)
+        return sample, torch.tensor(labels, dtype=torch.long)
+
+    def __len__(self):
+        return len(self.imgidx)
+    
+    def set_use_cache(self, use_cache):
+        self.use_cache = use_cache
+
+
+'''
+test_mode: False or val/dev/test
+'''
+class MX_WFAS_DualStream(Dataset):
     def __init__(self, path_imgrec, path_imgidx, input_size, test_mode=False, scale=1.0):
         super(MX_WFAS, self).__init__()
         self.test_mode = test_mode
@@ -178,11 +251,14 @@ class MX_WFAS(Dataset):
         sample_filted = transform_band_pass_filter(sample, self.kernel_bpf.copy())
         # cv2.imwrite("./tmp.jpg", sample)
         
+        # if self.transform is not None:
+        #     sample = self.transform(image=sample)["image"]
+        #     sample_filted = self.transform(image=sample_filted)["image"]
+        # sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
+        # sample_filted = np.transpose(sample_filted, (2, 0, 1)).astype(np.float32)
         if self.transform is not None:
-            sample = self.transform(image=sample)["image"]
-            sample_filted = self.transform(image=sample_filted)["image"]
-        sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
-        sample_filted = np.transpose(sample_filted, (2, 0, 1)).astype(np.float32)
+            sample = self.transform(sample)
+            sample_filted = self.transform(sample_filted)
 
 
         if self.test_mode:

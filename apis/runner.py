@@ -321,6 +321,9 @@ class Runner(object):
 
             # if self.log_cfg.plog_cfg is not None:
             #     self.vis_log(self.log_cfg.filename)
+            if epoch == start_epoch and cfg.data.train.get("ram_cache", False):
+                self.logger.info(f'Utilizing cached data in RAM...')
+                dataloader.dataset.set_use_cache(True)
 
             self._epoch += 1
             self.scheduler.step()
