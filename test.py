@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument('--result_file', default='results.txt', help='the result file to save')
     parser.add_argument('--img_prefix', default=None, help='A folder of data')
     parser.add_argument('--gpus', type=int, default=None, help='the number of gpus to use')
-    parser.add_argument('--thr', type=float, default=0.6931, help='thr of dev')
+    parser.add_argument('--thr', type=float, default=None, help='thr of dev')
     args = parser.parse_args()
 
     return args

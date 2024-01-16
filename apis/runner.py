@@ -296,7 +296,7 @@ class Runner(object):
             output = self.model(img=data[1], label=data[2])
             preds = output[0].detach().cpu()
             for i, item_idx in enumerate(data[0]):
-                preds_all[item_idx][1] = float(preds[i] >= thr)
+                preds_all[item_idx][1] = preds[i] if thr is None else float(preds[i] >= thr)
         
         res_path = os.path.join(self.work_dir, resfile)
         self.logger.info(f"write result: {res_path}...")
