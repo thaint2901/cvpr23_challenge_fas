@@ -110,6 +110,7 @@ class DANN(nn.Module):
         self.encoder = encoders(encoder)
         self.adv = Discriminator(**adv_cfg, input_dim=feat_dim)
         self.classifer = Classifier(**cls_cfg, feat_dim=feat_dim)
+        self.convert_onnx = False
 
         self.cls_loss = nn.CrossEntropyLoss()
         self.bce_loss = nn.BCEWithLogitsLoss()
@@ -134,6 +135,9 @@ class DANN(nn.Module):
         else:
             pred = torch.sigmoid(out/5)[:, 0]
             output = [pred]
+            if self.convert_onnx:
+                return output
+
             if self.return_label:
                 output.append(label)
             if self.return_feature:

@@ -156,6 +156,87 @@ def get_shared_memory(type_, size):
 '''
 test_mode: False or val/dev/test
 '''
+class MXMulti_FAS(Dataset):
+    def __init__(self, data_paths, input_size, ram_cache=False, test_mode=False, scale=1.0):
+        super(MXMulti_FAS, self).__init__()
+        self.test_mode = test_mode
+        if self.test_mode:
+            self.transform = get_val_transform(input_size)
+        else:
+            self.transform = get_train_transform(input_size)
+        
+        self.imgrec_list = []
+        self.imgidx_list = []
+        self.datasize_list = []
+        for basepath in data_paths:
+            imgrec = mx.recordio.MXIndexedRecordIO(f"{basepath}.idx", f"{basepath}.rec", 'r')
+            imgidx = np.array(list(imgrec.keys))
+            self.imgidx_list.append(imgidx)
+            self.imgrec_list.append(imgrec)
+            self.datasize_list.append(imgidx.shape[0])
+        self.scale = scale
+        self.use_cache = False
+        self.input_size = input_size
+        self.ram_cache = ram_cache
+        if self.ram_cache:
+            self.shared_dataset = get_shared_memory(ctypes.c_uint8, (len(self.imgidx), input_size, input_size, 3))
+            self.shared_labels = get_shared_memory(ctypes.c_int64, (len(self.imgidx), 2))
+
+    def _get_imgidx(self, index):
+        for data_ord, size in enumerate(self.datasize_list):
+            if index >= size:
+                index -= size
+                continue
+            else:
+                rec_idx = index
+                return data_ord, rec_idx
+
+    def __getitem__(self, index):
+        if self.use_cache:
+            sample = self.shared_dataset[index]
+            labels = self.shared_labels[index]
+        else:
+            data_ord, data_idx = self._get_imgidx(index)
+            idx = self.imgidx_list[data_ord][data_idx]
+            s = self.imgrec_list[data_ord].read_idx(idx)
+            header, img = mx.recordio.unpack(s)
+            labels = header.label
+            sample = mx.image.imdecode(img).asnumpy()  # RGB
+            bbox = labels[2:6].astype(np.int32)
+            label = int(labels[0])
+            labels = [label, int(labels[1]) + 1]  # 0: live, 1->n: spoof_type
+            
+            # crop face bbox
+            # scale = np.random.uniform(1.0, 1.2)
+            bbox = get_new_box(sample.shape[1], sample.shape[0], bbox, scale=self.scale)
+            sample = sample[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
+            
+            if self.ram_cache:
+                sample = cv2.resize(sample, (self.input_size, self.input_size))
+                self.shared_dataset[index] = sample.copy()
+                self.shared_labels[index] = np.array(labels)
+        # cv2.imwrite("./tmp.jpg", sample)
+        
+        if self.transform is not None:
+            sample = self.transform(image=sample)["image"]
+        sample = np.transpose(sample, (2, 0, 1)).astype(np.float32)
+        # if self.transform is not None:
+        #     sample = self.transform(sample)
+
+        if self.test_mode:
+            return idx, sample, torch.tensor(labels, dtype=torch.long)
+        return sample, torch.tensor(labels, dtype=torch.long)
+
+    def __len__(self):
+        return sum(self.datasize_list)
+    
+    def set_use_cache(self, use_cache):
+        self.use_cache = use_cache
+
+
+'''
+test_mode: False or val/dev/test
+'''
 class MX_WFAS(Dataset):
     def __init__(self, path_imgrec, path_imgidx, input_size, ram_cache=False, test_mode=False, scale=1.0):
         super(MX_WFAS, self).__init__()
@@ -271,11 +352,11 @@ class MX_WFAS_DualStream(Dataset):
 
 if __name__ == "__main__":
     train_set = MX_WFAS(
-        path_imgrec="/mnt/sdc1/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/test_4.0.rec",
-        path_imgidx="/mnt/sdc1/datasets/untispoofing/CVPR2023-Anti_Spoof-Challenge-Release-Data-20230209/test_4.0.idx",
+        path_imgrec="/mnt/nvme0n1p2/datasets/untispoofing/zalo/train/zalo_liveness.rec",
+        path_imgidx="/mnt/nvme0n1p2/datasets/untispoofing/zalo/train/zalo_liveness.idx",
         input_size=224,
         test_mode=False,
-        scale=1.0
+        scale=1.2
     )
 
     while True:

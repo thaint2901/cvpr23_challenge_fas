@@ -25,10 +25,7 @@ def parse_args():
     """parse args"""
     parser = argparse.ArgumentParser(description='Train')
     parser.add_argument('config', help='path to train config file')
-    parser.add_argument('--work_dir', help='the dir to save logs and models')
-    parser.add_argument('--load_from', help='the checkpoint file to load from')
-    parser.add_argument('--result_file', default='results.txt', help='the result file to save')
-    parser.add_argument('--img_prefix', default=None, help='A folder of data')
+    parser.add_argument('--eval', action='store_true', help="run eval")
     parser.add_argument('--gpus', type=int, default=None, help='the number of gpus to use')
     parser.add_argument('--thr', type=float, default=None, help='thr of dev')
     args = parser.parse_args()
@@ -45,15 +42,6 @@ def main():
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
 
-    if args.work_dir is not None:
-        cfg.work_dir = args.work_dir
-
-    if args.load_from is not None:
-        cfg.check_cfg.load_from = args.load_from
-    
-    if args.img_prefix is not None:
-        cfg.data.test.img_prefix = args.img_prefix
-
     if isinstance(args.gpus, int):
         cfg.gpu_ids = range(args.gpus)
 
@@ -69,10 +57,6 @@ def main():
     model = build_models(cfg.model)
     model = DataParallel(model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
-    dataset = build_datasets(cfg.data.test)
-    dataloader = build_dataloaders(cfg.data.test_loader, dataset)
-    # logger.info(f'Test dataset: {dataset.groups}')
-
     runner = Runner(
         model,
         logger,
@@ -80,7 +64,21 @@ def main():
         log_cfg=cfg.log_cfg,
         eval_cfg=cfg.eval_cfg,
         check_cfg=cfg.check_cfg)
-    runner.test(dataloader, resfile=os.path.basename(cfg.work_dir)+f'res_{dataloader.dataset.test_mode}.txt', thr=args.thr)
+    
+    if args.eval:
+        val_dataset = build_datasets(cfg.data.val)
+        val_dataloader = build_dataloaders(cfg.data.test_loader, val_dataset)
+        runner.val_dataloader = val_dataloader
+
+        logger.info(f'Running evaluate...')
+        runner.val()
+    else:
+
+        dataset = build_datasets(cfg.data.test)
+        dataloader = build_dataloaders(cfg.data.test_loader, dataset)
+        # logger.info(f'Test dataset: {dataset.groups}')
+
+        runner.test(dataloader, resfile=os.path.basename(cfg.work_dir)+f'res_{dataloader.dataset.test_mode}.txt', thr=args.thr)
 
 
 if __name__ == '__main__':
