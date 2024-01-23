@@ -126,8 +126,8 @@ def get_train_transform(input_size=224):
                                                             brightness_by_max=True,
                                                             always_apply=False, p=0.3),
         A.augmentations.transforms.MotionBlur(blur_limit=5, p=0.3),
-        A.Normalize(mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.2254, 0.225])
+        A.Normalize(mean=[0.5, 0.5, 0.5],
+                    std=[0.5, 0.5, 0.5])
     ])
 
 def get_val_transform(input_size=224):
@@ -141,8 +141,8 @@ def get_val_transform(input_size=224):
     # ])
     return A.Compose([
         A.Resize(width=input_size, height=input_size, interpolation=cv2.INTER_CUBIC),
-        A.Normalize(mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.2254, 0.225])
+        A.Normalize(mean=[0.5, 0.5, 0.5],
+                    std=[0.5, 0.5, 0.5])
     ])
 
 
@@ -352,8 +352,8 @@ class MX_WFAS_DualStream(Dataset):
 
 if __name__ == "__main__":
     train_set = MX_WFAS(
-        path_imgrec="/mnt/nvme0n1p2/datasets/untispoofing/zalo/train/zalo_liveness.rec",
-        path_imgidx="/mnt/nvme0n1p2/datasets/untispoofing/zalo/train/zalo_liveness.idx",
+        path_imgrec="/mnt/nvme0n1p2/datasets/face/dyno/spoofing_test/spoofing_test_4.0.rec",
+        path_imgidx="/mnt/nvme0n1p2/datasets/face/dyno/spoofing_test/spoofing_test_4.0.idx",
         input_size=224,
         test_mode=False,
         scale=1.2

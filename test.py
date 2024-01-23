@@ -71,9 +71,8 @@ def main():
         runner.val_dataloader = val_dataloader
 
         logger.info(f'Running evaluate...')
-        runner.val()
+        runner.val(thr=args.thr)
     else:
-
         dataset = build_datasets(cfg.data.test)
         dataloader = build_dataloaders(cfg.data.test_loader, dataset)
         # logger.info(f'Test dataset: {dataset.groups}')

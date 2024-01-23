@@ -41,6 +41,7 @@ class Classifier(nn.Module):
         self.return_feature = self.test_cfg.pop('return_feature', False)
 
         self.encoder = encoders(encoder)
+        self.convert_onnx = False
 
         self.cls_loss = nn.CrossEntropyLoss()
 
@@ -58,6 +59,9 @@ class Classifier(nn.Module):
         else:
             pred = F.softmax(feat, dim=1)[:, 0]
             output = [pred]
+            if self.convert_onnx:
+                return output
+
             if self.return_label:
                 output.append(label)
             if self.return_feature:

@@ -256,7 +256,7 @@ class Runner(object):
 
 
     @torch.no_grad()
-    def val(self):
+    def val(self, thr=None):
         """val method"""
         # feats = list()
         preds = list()
@@ -271,7 +271,7 @@ class Runner(object):
         self.model.train()
         preds = np.concatenate(preds)
         labels = np.concatenate(labels)
-        score, eval_dict = self.metric(preds, labels)
+        score, eval_dict = self.metric(preds, labels, thr=thr)
         # if len(feats) > 0:
             # feats = np.concatenate(feats)
             # self.writer_log.add_embeddings(tag='feature', mat=feats, metadata=labels.astype(str))

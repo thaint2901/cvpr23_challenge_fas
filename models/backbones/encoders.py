@@ -13,15 +13,13 @@ Date:    2021/12/06 18:22:06
 
 import torch
 import timm.models as tm
-from .maddg import maddg
 from .cdcn import cdcnet, cdcnet_pp
-from .mobilenetv1 import mobilenetv1_145, mobilenetv3_1201
+from .mobilefacenet import MobileFaceNet
 from timm.models.helpers import adapt_input_conv
 
 
 local_pretrained_dict = {
-    'mobilenetv1_145': 'pretrained/model_145.pth.tar',
-    'mobilenetv1_1201': 'model_1201.pth.tar',
+    'MobileFaceNet': 'pretrained/model_mobilefacenet.pth',
 }
 
 
@@ -93,29 +91,13 @@ def load_pretrained(model,
 def encoders(encoder_cfg):
     _encoder_cfg = encoder_cfg.copy()
     etype = _encoder_cfg.pop('type')
-    if etype in ['mobilenetv1_145', 'mobilenetv1_1201', 'cdcnet', 'cdcnet_pp']:
+    pretrained = _encoder_cfg.pop('pretrained')
+    if etype in ['cdcnet', 'cdcnet_pp', 'MobileFaceNet']:
         model = eval(etype)(**_encoder_cfg)
-        if _encoder_cfg['pretrained'] and etype in local_pretrained_dict:
+        if pretrained and etype in local_pretrained_dict:
+            print(f"INFO: Init weight from {local_pretrained_dict[etype]}...")
             model.load_state_dict(torch.load(local_pretrained_dict[etype], map_location='cpu'))
-        return model
-    if _encoder_cfg['pretrained'] and etype in local_pretrained_dict:
-        _encoder_cfg['pretrained'] = False
-        classifier = _encoder_cfg.pop('classifier', False)
-        model = eval('tm.{}'.format(etype))(**_encoder_cfg)
-        features = _encoder_cfg.pop('features_only', False)
-        if classifier:
-            model.default_cfg['classifier'] = classifier
-            model.default_cfg['num_classes'] = 1000
-        if features:
-            num_classes_pretrained = 0
-        else:
-            num_classes_pretrained = getattr(model, 'num_classes', _encoder_cfg.get('num_classes', 1000))
-        load_pretrained(model,
-                        local_pretrained_dict[etype],
-                        num_classes=num_classes_pretrained,
-                        in_chans=_encoder_cfg.get('in_chans', 3),
-                        filter_fn=None,
-                        strict=True)
+
     else:
         model = eval('tm.{}'.format(etype))(**_encoder_cfg)
     return model
